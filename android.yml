@@ -1,0 +1,63 @@
+name: MojoLauncher APK Build
+
+'on':
+push:
+branches:
+- main
+workflow_dispatch:
+
+jobs:
+build:
+runs-on: ubuntu-latest
+
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
+
+  - name: Find project ZIP
+    id: project
+    run: |
+      ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+      if [ -z "$ZIP_FILE" ]; then
+        echo "No ZIP file found in the repository root."
+        exit 1
+      fi
+      echo "zip=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+  - name: Set up Java
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
+
+  - name: Extract project
+    run: |
+      mkdir extracted
+      unzip -q "${{ steps.project.outputs.zip }}" -d extracted
+      SETTINGS_FILE="$(find extracted -type f -name settings.gradle -o -name settings.gradle.kts -print -quit)"
+      if [ -z "$SETTINGS_FILE" ]; then
+        echo "No Gradle settings file found in the ZIP."
+        exit 1
+      fi
+      PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+      cp -a "$PROJECT_DIR/." .
+      if [ ! -f settings.gradle ] && [ ! -f settings.gradle.kts ]; then
+        echo "Gradle project was not extracted into the repository root."
+        exit 1
+      fi
+
+  - name: Set up Gradle
+    uses: gradle/actions/setup-gradle@v4
+    with:
+      gradle-version: '8.9'
+
+  - name: Build debug APK
+    run: gradle assembleDebug --stacktrace
+
+  - name: Upload APK
+    if: success()
+    uses: actions/upload-artifact@v4
+    with:
+      name: MojoLauncher-debug-APK
+      path: app/build/outputs/apk/debug/*.apk
+      if-no-files-found: error
