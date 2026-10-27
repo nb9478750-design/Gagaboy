@@ -1,22 +1,28 @@
-name: Build MojoLauncher APK
+name: MojoLauncher APK Build
 
 'on':
-workflow_dispatch:
 push:
 branches:
 - main
-
-permissions:
-contents: read
+workflow_dispatch:
 
 jobs:
 build:
-name: Build Android APK
 runs-on: ubuntu-latest
 
 steps:
   - name: Checkout repository
     uses: actions/checkout@v4
+
+  - name: Find project ZIP
+    id: project
+    run: |
+      ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+      if [ -z "$ZIP_FILE" ]; then
+        echo "No ZIP file found in the repository root."
+        exit 1
+      fi
+      echo "zip=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
   - name: Set up Java
     uses: actions/setup-java@v4
@@ -24,25 +30,21 @@ steps:
       distribution: temurin
       java-version: '17'
 
-  - name: Extract project ZIP
-    shell: bash
+  - name: Extract project
     run: |
-      set -euo pipefail
-      ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
-      if [ -z "$ZIP_FILE" ]; then
-        echo "ERROR: No project ZIP found in the repository root."
-        exit 1
-      fi
       mkdir extracted
-      unzip -q "$ZIP_FILE" -d extracted
+      unzip -q "${{ steps.project.outputs.zip }}" -d extracted
       SETTINGS_FILE="$(find extracted -type f -name settings.gradle -o -name settings.gradle.kts -print -quit)"
       if [ -z "$SETTINGS_FILE" ]; then
-        echo "ERROR: No Gradle settings file found inside the ZIP."
+        echo "No Gradle settings file found in the ZIP."
         exit 1
       fi
       PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
       cp -a "$PROJECT_DIR/." .
-      test -f settings.gradle || test -f settings.gradle.kts
+      if [ ! -f settings.gradle ] && [ ! -f settings.gradle.kts ]; then
+        echo "Gradle project was not extracted into the repository root."
+        exit 1
+      fi
 
   - name: Set up Gradle
     uses: gradle/actions/setup-gradle@v4
@@ -53,10 +55,9 @@ steps:
     run: gradle assembleDebug --stacktrace
 
   - name: Upload APK
-    if: always()
+    if: success()
     uses: actions/upload-artifact@v4
     with:
-      name: MojoLauncher-debug
+      name: MojoLauncher-debug-APK
       path: app/build/outputs/apk/debug/*.apk
-      if-no-files-found: warn
-      retention-days: 7
+      if-no-files-found: error
